@@ -31,25 +31,13 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:3000")); // Cho phép React truy cập
+        configuration.setAllowedOrigins(List.of("http://localhost:3000"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        configuration.setAllowCredentials(true); // Cho phép gửi cookie/session
-        
-        // Nếu cần chấp nhận tất cả các origin:
-        // configuration.setAllowedOrigins(Collections.singletonList("*"));
-        // hoặc chỉ định origin cụ thể như trên
+        configuration.setAllowedHeaders(List.of("*")); // Cho phép tất cả headers
+        configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
-
 }
-
-
-
-
-
-
-
