@@ -214,5 +214,11 @@ public class ProductService {
         dto.setColorCode(color.getColorCode());
         return dto;
     }
+    public void updateProductImage(Long productId, String imageUrl) {
+        Product product = productRepository.findById(productId).orElseThrow(() -> new RuntimeException("Sản phẩm không tồn tại"));
+        product.setImageUrl(imageUrl); // Lưu tên file vào database
+        productRepository.save(product);
+    }
+
 }
 
