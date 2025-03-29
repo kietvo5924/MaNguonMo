@@ -1,5 +1,7 @@
 package com.example.backend.services;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +25,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class ProductService {
+
+    private static final Logger logger = LoggerFactory.getLogger(ProductService.class);
 
     private final ProductRepository productRepository;
     private final ProductVersionRepository productVersionRepository;
@@ -52,6 +56,8 @@ public class ProductService {
 
     @Transactional
     public ProductDTO createProduct(ProductDTO productDTO) {
+        validateProductDTO(productDTO);
+
         Product product = new Product();
         product.setName(productDTO.getName());
         product.setDescription(productDTO.getDescription());
@@ -63,7 +69,6 @@ public class ProductService {
                 .orElseThrow(() -> new RuntimeException("Category not found"));
         product.setCategory(category);
 
-        // Lưu product trước để lấy ID
         final Product savedProduct = productRepository.save(product);
 
         Set<ProductVersion> versions = productDTO.getVersions().stream().map(versionDTO -> {
@@ -72,14 +77,13 @@ public class ProductService {
             version.setExtraPrice(versionDTO.getExtraPrice());
             version.setProduct(savedProduct);
 
-            // Lưu version vào database trước và gán vào biến final
             final ProductVersion savedVersion = productVersionRepository.save(version);
 
             Set<ProductColor> colors = versionDTO.getColors().stream().map(colorDTO -> {
                 ProductColor color = new ProductColor();
                 color.setColorName(colorDTO.getColorName());
                 color.setColorCode(colorDTO.getColorCode());
-                color.setProductVersion(savedVersion); // Sử dụng biến final
+                color.setProductVersion(savedVersion);
                 return productColorRepository.save(color);
             }).collect(Collectors.toSet());
 
@@ -87,7 +91,6 @@ public class ProductService {
             return savedVersion;
         }).collect(Collectors.toSet());
 
-        // Cập nhật lại danh sách phiên bản vào product đã lưu
         savedProduct.setVersions(versions);
 
         return convertToDTO(savedProduct);
@@ -95,27 +98,127 @@ public class ProductService {
 
     @Transactional
     public ProductDTO updateProduct(Long id, ProductDTO productDTO) {
-        Product existingProduct = productRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Product not found"));
+        try {
+            logger.info("Starting updateProduct for product ID: {}", id);
+            logger.debug("ProductDTO received: {}", productDTO);
 
-        // Cập nhật các trường thông tin của sản phẩm
-        existingProduct.setName(productDTO.getName());
-        existingProduct.setDescription(productDTO.getDescription());
-        existingProduct.setPrice(productDTO.getPrice());
-        existingProduct.setStockQuantity(productDTO.getStockQuantity());
-        existingProduct.setImageUrl(productDTO.getImageUrl());
+            // Kiểm tra sản phẩm có tồn tại không
+            Product existingProduct = productRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
+            logger.info("Found product with ID: {}", id);
 
-        // Cập nhật category
-        Category category = categoryRepository.findById(productDTO.getCategoryId())
-                .orElseThrow(() -> new RuntimeException("Category not found"));
-        existingProduct.setCategory(category);
+            // Kiểm tra dữ liệu đầu vào
+            validateProductDTO(productDTO);
 
-        // Lưu sản phẩm đã cập nhật vào cơ sở dữ liệu
-        Product savedProduct = productRepository.save(existingProduct);
+            // Cập nhật các trường thông tin của sản phẩm
+            existingProduct.setName(productDTO.getName());
+            existingProduct.setDescription(productDTO.getDescription());
+            existingProduct.setPrice(productDTO.getPrice());
+            existingProduct.setStockQuantity(productDTO.getStockQuantity());
+            existingProduct.setImageUrl(productDTO.getImageUrl());
 
-        return convertToDTO(savedProduct);  // Trả về DTO của sản phẩm đã được cập nhật
+            // Kiểm tra và cập nhật category
+            if (productDTO.getCategoryId() == null) {
+                throw new RuntimeException("Category ID cannot be null");
+            }
+            Category category = categoryRepository.findById(productDTO.getCategoryId())
+                    .orElseThrow(() -> new RuntimeException("Category not found with id: " + productDTO.getCategoryId()));
+            existingProduct.setCategory(category);
+            logger.info("Category updated for product ID: {}", id);
+
+            // Xóa toàn bộ versions và colors cũ thông qua repository
+            logger.info("Deleting existing versions and colors for product ID: {}", id);
+            Set<ProductVersion> existingVersions = new HashSet<>(existingProduct.getVersions()); // Tạo bản sao để tránh ConcurrentModificationException
+            for (ProductVersion version : existingVersions) {
+                logger.debug("Deleting colors for version ID: {}", version.getId());
+                productColorRepository.deleteAll(version.getColors());
+                productVersionRepository.delete(version);
+            }
+            existingProduct.getVersions().clear(); // Xóa sau khi đã xóa trong database
+            logger.info("Existing versions and colors deleted for product ID: {}", id);
+
+            // Lưu sản phẩm để đảm bảo trạng thái được đồng bộ
+            productRepository.save(existingProduct);
+
+            // Kiểm tra versions từ DTO
+            if (productDTO.getVersions() == null) {
+                throw new RuntimeException("Versions cannot be null");
+            }
+
+            // Thêm các versions và colors mới
+            logger.info("Adding new versions and colors for product ID: {}", id);
+            Set<ProductVersion> newVersions = new HashSet<>();
+            for (ProductVersionDTO versionDTO : productDTO.getVersions()) {
+                if (versionDTO.getVersionName() == null || versionDTO.getVersionName().isEmpty()) {
+                    throw new RuntimeException("Version name cannot be null or empty");
+                }
+                if (versionDTO.getExtraPrice() == null) {
+                    throw new RuntimeException("Extra price cannot be null for version: " + versionDTO.getVersionName());
+                }
+                if (versionDTO.getColors() == null) {
+                    throw new RuntimeException("Colors cannot be null for version: " + versionDTO.getVersionName());
+                }
+
+                ProductVersion version = new ProductVersion();
+                version.setVersionName(versionDTO.getVersionName());
+                version.setExtraPrice(versionDTO.getExtraPrice());
+                version.setProduct(existingProduct);
+
+                ProductVersion savedVersion = productVersionRepository.save(version);
+                logger.debug("Saved version: {}", savedVersion.getId());
+
+                Set<ProductColor> colors = new HashSet<>();
+                for (ProductColorDTO colorDTO : versionDTO.getColors()) {
+                    if (colorDTO.getColorName() == null || colorDTO.getColorName().isEmpty()) {
+                        throw new RuntimeException("Color name cannot be null or empty");
+                    }
+                    if (colorDTO.getColorCode() == null || colorDTO.getColorCode().isEmpty()) {
+                        throw new RuntimeException("Color code cannot be null or empty for color: " + colorDTO.getColorName());
+                    }
+
+                    ProductColor color = new ProductColor();
+                    color.setColorName(colorDTO.getColorName());
+                    color.setColorCode(colorDTO.getColorCode());
+                    color.setProductVersion(savedVersion);
+                    ProductColor savedColor = productColorRepository.save(color);
+                    logger.debug("Saved color: {}", savedColor.getId());
+                    colors.add(savedColor);
+                }
+
+                savedVersion.setColors(colors);
+                newVersions.add(savedVersion);
+            }
+
+            // Gán versions mới và để Hibernate tự quản lý
+            existingProduct.getVersions().addAll(newVersions);
+
+            Product savedProduct = productRepository.save(existingProduct);
+            logger.info("Product updated successfully with ID: {}", savedProduct.getId());
+
+            return convertToDTO(savedProduct);
+        } catch (RuntimeException e) {
+            logger.error("Failed to update product: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to update product: " + e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error while updating product: {}", e.getMessage(), e);
+            throw new RuntimeException("Unexpected error while updating product: " + e.getMessage());
+        }
     }
 
+    private void validateProductDTO(ProductDTO productDTO) {
+        if (productDTO.getName() == null || productDTO.getName().isEmpty()) {
+            throw new RuntimeException("Product name cannot be null or empty");
+        }
+        if (productDTO.getPrice() == null || productDTO.getPrice() < 0) {
+            throw new RuntimeException("Price cannot be null or negative");
+        }
+        if (productDTO.getStockQuantity() == null || productDTO.getStockQuantity() < 0) {
+            throw new RuntimeException("Stock quantity cannot be null or negative");
+        }
+        if (productDTO.getCategoryId() == null) {
+            throw new RuntimeException("Category ID cannot be null");
+        }
+    }
 
     public void deleteProduct(Long id) {
         productRepository.deleteById(id);
@@ -152,24 +255,18 @@ public class ProductService {
         dto.setVersions(versionDTOs);
         return dto;
     }
-    
-    
-    
-    
+
     @Transactional
     public ProductVersionDTO updateProductVersion(Long versionId, ProductVersionDTO versionDTO) {
-        // Tìm kiếm phiên bản sản phẩm theo ID
         ProductVersion existingVersion = productVersionRepository.findById(versionId)
                 .orElseThrow(() -> new RuntimeException("Product Version not found"));
 
-        // Cập nhật thông tin phiên bản sản phẩm
         existingVersion.setVersionName(versionDTO.getVersionName());
         existingVersion.setExtraPrice(versionDTO.getExtraPrice());
 
-        // Lưu phiên bản đã cập nhật vào cơ sở dữ liệu
         ProductVersion savedVersion = productVersionRepository.save(existingVersion);
 
-        return convertToVersionDTO(savedVersion);  // Trả về DTO của phiên bản đã được cập nhật
+        return convertToVersionDTO(savedVersion);
     }
 
     private ProductVersionDTO convertToVersionDTO(ProductVersion version) {
@@ -190,21 +287,17 @@ public class ProductService {
         return dto;
     }
 
-    
     @Transactional
     public ProductColorDTO updateProductColor(Long colorId, ProductColorDTO colorDTO) {
-        // Tìm kiếm màu sắc sản phẩm theo ID
         ProductColor existingColor = productColorRepository.findById(colorId)
                 .orElseThrow(() -> new RuntimeException("Product Color not found"));
 
-        // Cập nhật thông tin màu sắc
         existingColor.setColorName(colorDTO.getColorName());
         existingColor.setColorCode(colorDTO.getColorCode());
 
-        // Lưu màu sắc đã cập nhật vào cơ sở dữ liệu
         ProductColor savedColor = productColorRepository.save(existingColor);
 
-        return convertToColorDTO(savedColor);  // Trả về DTO của màu sắc đã được cập nhật
+        return convertToColorDTO(savedColor);
     }
 
     private ProductColorDTO convertToColorDTO(ProductColor color) {
@@ -214,5 +307,11 @@ public class ProductService {
         dto.setColorCode(color.getColorCode());
         return dto;
     }
-}
 
+    public void updateProductImage(Long productId, String imageUrl) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new RuntimeException("Sản phẩm không tồn tại"));
+        product.setImageUrl(imageUrl);
+        productRepository.save(product);
+    }
+}
