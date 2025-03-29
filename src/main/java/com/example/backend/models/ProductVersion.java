@@ -21,9 +21,9 @@ public class ProductVersion {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne
-    @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
+	@ManyToOne
+	@JoinColumn(name = "product_id", nullable = false)
+	private Product product;
 
     @Column(nullable = false, length = 50)
     private String versionName; // Ví dụ: "8GB RAM - 128GB SSD"
