@@ -4,7 +4,6 @@ import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.backend.DTO.OrderDTO;
 import com.example.backend.DTO.OrderRequestDTO;
+import com.example.backend.DTO.PaymentRequestDTO; // Thêm DTO cho thanh toán
 import com.example.backend.services.OrderService;
 
 @RestController
@@ -58,10 +58,21 @@ public class OrderController {
 
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<OrderDTO>> getOrdersByUser(@PathVariable Long userId) {
-        List<OrderDTO> orders = orderService.getOrdersByUser(userId);
-        return ResponseEntity.ok(orders);
+        try {
+            List<OrderDTO> orders = orderService.getOrdersByUser(userId);
+            return ResponseEntity.ok(orders);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+    }
+
+    @PostMapping("/{orderId}/pay")
+    public ResponseEntity<OrderDTO> payOrder(@PathVariable Long orderId, @RequestBody PaymentRequestDTO paymentRequest) {
+        try {
+            OrderDTO paidOrder = orderService.processPayment(orderId, paymentRequest);
+            return ResponseEntity.ok(paidOrder);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
     }
 }
-
-
-
