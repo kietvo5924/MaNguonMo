@@ -11,7 +11,8 @@ import org.springframework.stereotype.Service;
 import com.example.backend.DTO.OrderDTO;
 import com.example.backend.DTO.OrderDetailDTO;
 import com.example.backend.DTO.OrderRequestDTO;
-import com.example.backend.DTO.OrderItemDTO; // Make sure this DTO exists in your project
+import com.example.backend.DTO.OrderItemDTO;
+import com.example.backend.DTO.PaymentRequestDTO; // Thêm DTO mới cho thanh toán
 import com.example.backend.models.Order;
 import com.example.backend.models.OrderDetail;
 import com.example.backend.models.Product;
@@ -37,7 +38,6 @@ public class OrderService {
     private final ProductVersionRepository productVersionRepository;
     private final ProductColorRepository productColorRepository;
 
-    // Constructor injection
     @Autowired
     public OrderService(OrderRepository orderRepository, OrderDetailRepository orderDetailRepository,
                         UserRepository userRepository, ProductRepository productRepository,
@@ -52,24 +52,21 @@ public class OrderService {
 
     @Transactional
     public OrderDTO createOrder(OrderRequestDTO orderRequest) {
-        // Step 1: Retrieve user and check existence
         User user = userRepository.findById(orderRequest.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // Step 2: Create the Order object
         Order order = new Order();
         order.setUser(user);
         order.setOrderDate(LocalDateTime.now());
         order.setStatus("PENDING");
+        order.setPaymentStatus("UNPAID"); // Thêm trạng thái thanh toán mặc định
         order.setShippingAddress(orderRequest.getShippingAddress());
         order.setTotalPrice(0.0);
 
-        // Step 3: Save the order and initialize orderDetails list
         orderRepository.save(order);
         double totalOrderPrice = 0.0;
         List<OrderDetail> orderDetails = new ArrayList<>();
 
-        // Step 4: Process each item in the orderRequest
         for (OrderItemDTO item : orderRequest.getItems()) {
             Product product = productRepository.findById(item.getProductId())
                     .orElseThrow(() -> new RuntimeException("Product not found"));
@@ -80,7 +77,6 @@ public class OrderService {
             ProductColor productColor = item.getProductColorId() != null ?
                     productColorRepository.findById(item.getProductColorId()).orElse(null) : null;
 
-            // Step 5: Calculate price including version and color options
             double price = product.getPrice();
             if (productVersion != null && productVersion.getExtraPrice() != null) {
                 price += productVersion.getExtraPrice();
@@ -89,7 +85,6 @@ public class OrderService {
             double totalAmount = price * item.getQuantity();
             totalOrderPrice += totalAmount;
 
-            // Step 6: Create OrderDetail object
             OrderDetail orderDetail = new OrderDetail();
             orderDetail.setOrder(order);
             orderDetail.setProduct(product);
@@ -102,12 +97,10 @@ public class OrderService {
             orderDetails.add(orderDetail);
         }
 
-        // Step 7: Update the total price for the order and save it
         order.setTotalPrice(totalOrderPrice);
         orderRepository.save(order);
         orderDetailRepository.saveAll(orderDetails);
 
-        // Step 8: Return the OrderDTO with mapped details
         return mapToOrderDTO(order, orderDetails);
     }
 
@@ -120,20 +113,18 @@ public class OrderService {
                 .map(order -> mapToOrderDTO(order, orderDetailRepository.findByOrder(order)))
                 .collect(Collectors.toList());
     }
-    
+
     @Transactional
     public OrderDTO updateOrder(Long orderId, OrderRequestDTO orderRequest) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
 
-        // Cập nhật thông tin đơn hàng (ví dụ: địa chỉ giao hàng)
         order.setShippingAddress(orderRequest.getShippingAddress());
         order.setTotalPrice(0.0);
 
         List<OrderDetail> orderDetails = new ArrayList<>();
         double totalOrderPrice = 0.0;
 
-        // Cập nhật các chi tiết đơn hàng
         for (OrderItemDTO item : orderRequest.getItems()) {
             Product product = productRepository.findById(item.getProductId())
                     .orElseThrow(() -> new RuntimeException("Product not found"));
@@ -152,7 +143,6 @@ public class OrderService {
             double totalAmount = price * item.getQuantity();
             totalOrderPrice += totalAmount;
 
-            // Tạo OrderDetail mới hoặc cập nhật nếu cần
             OrderDetail orderDetail = new OrderDetail();
             orderDetail.setOrder(order);
             orderDetail.setProduct(product);
@@ -165,7 +155,6 @@ public class OrderService {
             orderDetails.add(orderDetail);
         }
 
-        // Cập nhật giá trị tổng đơn hàng
         order.setTotalPrice(totalOrderPrice);
         orderRepository.save(order);
         orderDetailRepository.saveAll(orderDetails);
@@ -178,13 +167,32 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
 
-        // Xóa tất cả OrderDetails liên quan đến Order này
         orderDetailRepository.deleteByOrder(order);
-
-        // Xóa đơn hàng
         orderRepository.delete(order);
     }
 
+    @Transactional
+    public OrderDTO processPayment(Long orderId, PaymentRequestDTO paymentRequest) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        if (!"PENDING".equals(order.getStatus()) || "PAID".equals(order.getPaymentStatus())) {
+            throw new RuntimeException("Order cannot be paid. Current status: " + order.getStatus() + ", Payment status: " + order.getPaymentStatus());
+        }
+
+        if (paymentRequest.getAmount() == null || paymentRequest.getAmount() < order.getTotalPrice()) {
+            throw new RuntimeException("Payment amount is insufficient. Required: " + order.getTotalPrice());
+        }
+
+        order.setPaymentMethod(paymentRequest.getPaymentMethod());
+        order.setPaymentDate(LocalDateTime.now());
+        order.setPaymentStatus("PAID");
+        order.setStatus("SHIPPED"); // Chuyển trạng thái sau khi thanh toán
+        orderRepository.save(order);
+
+        List<OrderDetail> orderDetails = orderDetailRepository.findByOrder(order);
+        return mapToOrderDTO(order, orderDetails);
+    }
 
     private OrderDTO mapToOrderDTO(Order order, List<OrderDetail> orderDetails) {
         OrderDTO orderDTO = new OrderDTO();
@@ -194,6 +202,9 @@ public class OrderService {
         orderDTO.setStatus(order.getStatus());
         orderDTO.setTotalPrice(order.getTotalPrice());
         orderDTO.setShippingAddress(order.getShippingAddress());
+        orderDTO.setPaymentMethod(order.getPaymentMethod()); // Thêm thông tin thanh toán
+        orderDTO.setPaymentDate(order.getPaymentDate());
+        orderDTO.setPaymentStatus(order.getPaymentStatus());
 
         List<OrderDetailDTO> detailDTOs = orderDetails.stream().map(detail -> {
             OrderDetailDTO detailDTO = new OrderDetailDTO();
