@@ -31,16 +31,22 @@ public class CartService {
     public CartItemDTO addToCart(CartItemDTO cartItemDTO) {
         logger.info("Thêm sản phẩm vào giỏ hàng: {}", cartItemDTO);
         List<CartItem> existingItems = cartRepository.findByUserId(cartItemDTO.getUserId());
+
+        // Tìm sản phẩm có cùng productId, version, và color
         CartItem existingItem = existingItems.stream()
-                .filter(item -> item.getProductId().equals(cartItemDTO.getProductId()))
+                .filter(item -> item.getProductId().equals(cartItemDTO.getProductId())
+                        && (item.getVersion() == null ? cartItemDTO.getVersion() == null : item.getVersion().equals(cartItemDTO.getVersion()))
+                        && (item.getColor() == null ? cartItemDTO.getColor() == null : item.getColor().equals(cartItemDTO.getColor())))
                 .findFirst()
                 .orElse(null);
 
         CartItem cartItem;
         if (existingItem != null) {
+            // Nếu sản phẩm đã tồn tại (cùng productId, version, và color), tăng số lượng
             existingItem.setQuantity(existingItem.getQuantity() + cartItemDTO.getQuantity());
             cartItem = cartRepository.save(existingItem);
         } else {
+            // Nếu không, tạo một mục mới
             cartItem = convertToEntity(cartItemDTO);
             cartItem = cartRepository.save(cartItem);
         }
@@ -74,6 +80,9 @@ public class CartService {
         dto.setProductName(cartItem.getProductName());
         dto.setPrice(cartItem.getPrice());
         dto.setQuantity(cartItem.getQuantity());
+        dto.setVersion(cartItem.getVersion()); // Thêm version
+        dto.setColor(cartItem.getColor()); // Thêm color
+        dto.setColorCode(cartItem.getColorCode()); // Thêm colorCode
         return dto;
     }
 
@@ -85,6 +94,9 @@ public class CartService {
         cartItem.setProductName(dto.getProductName());
         cartItem.setPrice(dto.getPrice());
         cartItem.setQuantity(dto.getQuantity());
+        cartItem.setVersion(dto.getVersion()); // Thêm version
+        cartItem.setColor(dto.getColor()); // Thêm color
+        cartItem.setColorCode(dto.getColorCode()); // Thêm colorCode
         return cartItem;
     }
 }
