@@ -39,10 +39,25 @@ public class OrderController {
     @PutMapping("/{orderId}/status")
     public ResponseEntity<OrderDTO> updateOrderStatus(@PathVariable Long orderId, @RequestBody String newStatus) {
         try {
-            OrderDTO updatedOrder = orderService.updateOrderStatus(orderId, newStatus.replace("\"", ""));
+            String status = newStatus.replace("\"", "");
+            OrderDTO updatedOrder = orderService.updateOrderStatus(orderId, status);
             return ResponseEntity.ok(updatedOrder);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
+    }
+
+    @PutMapping("/{orderId}/confirm")
+    public ResponseEntity<OrderDTO> confirmOrder(@PathVariable Long orderId) {
+        try {
+            OrderDTO order = orderService.getOrderById(orderId);
+            if (order.getStatus().equals("PENDING")) {
+                OrderDTO updatedOrder = orderService.updateOrderStatus(orderId, "SHIPPED");
+                return ResponseEntity.ok(updatedOrder);
+            }
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
     }
 
@@ -66,11 +81,13 @@ public class OrderController {
         }
     }
 
-    // Thêm endpoint để lấy chi tiết đơn hàng
     @GetMapping("/{orderId}")
     public ResponseEntity<OrderDTO> getOrderById(@PathVariable Long orderId) {
         try {
-            OrderDTO order = orderService.getOrderById(orderId); // Cần thêm method này trong OrderService
+            OrderDTO order = orderService.getOrderById(orderId);
+            if ("COD".equals(order.getPaymentMethod())) {
+                order.setPaymentMethod("Cash");
+            }
             return ResponseEntity.ok(order);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
@@ -86,6 +103,7 @@ public class OrderController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
         }
     }
+
     @GetMapping
     public ResponseEntity<List<OrderDTO>> getAllOrders() {
         try {
