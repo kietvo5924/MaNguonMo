@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.backend.DTO.OrderDTO;
 import com.example.backend.DTO.OrderRequestDTO;
-import com.example.backend.DTO.PaymentRequestDTO; // Thêm DTO cho thanh toán
+import com.example.backend.DTO.PaymentRequestDTO;
 import com.example.backend.services.OrderService;
 
 @RestController
@@ -36,13 +36,13 @@ public class OrderController {
         return ResponseEntity.status(HttpStatus.CREATED).body(orderDTO);
     }
 
-    @PutMapping("/{orderId}")
-    public ResponseEntity<OrderDTO> updateOrder(@PathVariable Long orderId, @RequestBody OrderRequestDTO orderRequest) {
+    @PutMapping("/{orderId}/status")
+    public ResponseEntity<OrderDTO> updateOrderStatus(@PathVariable Long orderId, @RequestBody String newStatus) {
         try {
-            OrderDTO updatedOrder = orderService.updateOrder(orderId, orderRequest);
+            OrderDTO updatedOrder = orderService.updateOrderStatus(orderId, newStatus.replace("\"", ""));
             return ResponseEntity.ok(updatedOrder);
         } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
         }
     }
 
@@ -66,6 +66,17 @@ public class OrderController {
         }
     }
 
+    // Thêm endpoint để lấy chi tiết đơn hàng
+    @GetMapping("/{orderId}")
+    public ResponseEntity<OrderDTO> getOrderById(@PathVariable Long orderId) {
+        try {
+            OrderDTO order = orderService.getOrderById(orderId); // Cần thêm method này trong OrderService
+            return ResponseEntity.ok(order);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+    }
+
     @PostMapping("/{orderId}/pay")
     public ResponseEntity<OrderDTO> payOrder(@PathVariable Long orderId, @RequestBody PaymentRequestDTO paymentRequest) {
         try {
@@ -73,6 +84,15 @@ public class OrderController {
             return ResponseEntity.ok(paidOrder);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
+    }
+    @GetMapping
+    public ResponseEntity<List<OrderDTO>> getAllOrders() {
+        try {
+            List<OrderDTO> orders = orderService.getAllOrders();
+            return ResponseEntity.ok(orders);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
     }
 }

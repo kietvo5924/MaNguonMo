@@ -12,7 +12,7 @@ import com.example.backend.DTO.OrderDTO;
 import com.example.backend.DTO.OrderDetailDTO;
 import com.example.backend.DTO.OrderRequestDTO;
 import com.example.backend.DTO.OrderItemDTO;
-import com.example.backend.DTO.PaymentRequestDTO; // Thêm DTO mới cho thanh toán
+import com.example.backend.DTO.PaymentRequestDTO;
 import com.example.backend.models.Order;
 import com.example.backend.models.OrderDetail;
 import com.example.backend.models.Product;
@@ -59,7 +59,7 @@ public class OrderService {
         order.setUser(user);
         order.setOrderDate(LocalDateTime.now());
         order.setStatus("PENDING");
-        order.setPaymentStatus("UNPAID"); // Thêm trạng thái thanh toán mặc định
+        order.setPaymentStatus("UNPAID");
         order.setShippingAddress(orderRequest.getShippingAddress());
         order.setTotalPrice(0.0);
 
@@ -114,10 +114,21 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
+    // Thêm phương thức để lấy chi tiết đơn hàng theo orderId
+    public OrderDTO getOrderById(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+        List<OrderDetail> orderDetails = orderDetailRepository.findByOrder(order);
+        return mapToOrderDTO(order, orderDetails);
+    }
+
     @Transactional
     public OrderDTO updateOrder(Long orderId, OrderRequestDTO orderRequest) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        // Xóa các OrderDetail cũ trước khi cập nhật
+        orderDetailRepository.deleteByOrder(order);
 
         order.setShippingAddress(orderRequest.getShippingAddress());
         order.setTotalPrice(0.0);
@@ -162,6 +173,24 @@ public class OrderService {
         return mapToOrderDTO(order, orderDetails);
     }
 
+    // Thêm phương thức để cập nhật trạng thái đơn hàng
+    @Transactional
+    public OrderDTO updateOrderStatus(Long orderId, String newStatus) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        if (!"PENDING".equals(order.getStatus())) {
+            throw new RuntimeException("Only PENDING orders can be updated to SHIPPED");
+        }
+
+        order.setStatus(newStatus);
+        orderRepository.save(order);
+
+        List<OrderDetail> orderDetails = orderDetailRepository.findByOrder(order);
+        return mapToOrderDTO(order, orderDetails);
+    }
+
+
     @Transactional
     public void deleteOrder(Long orderId) {
         Order order = orderRepository.findById(orderId)
@@ -187,7 +216,7 @@ public class OrderService {
         order.setPaymentMethod(paymentRequest.getPaymentMethod());
         order.setPaymentDate(LocalDateTime.now());
         order.setPaymentStatus("PAID");
-        order.setStatus("SHIPPED"); // Chuyển trạng thái sau khi thanh toán
+        order.setStatus("SHIPPED");
         orderRepository.save(order);
 
         List<OrderDetail> orderDetails = orderDetailRepository.findByOrder(order);
@@ -202,7 +231,7 @@ public class OrderService {
         orderDTO.setStatus(order.getStatus());
         orderDTO.setTotalPrice(order.getTotalPrice());
         orderDTO.setShippingAddress(order.getShippingAddress());
-        orderDTO.setPaymentMethod(order.getPaymentMethod()); // Thêm thông tin thanh toán
+        orderDTO.setPaymentMethod(order.getPaymentMethod());
         orderDTO.setPaymentDate(order.getPaymentDate());
         orderDTO.setPaymentStatus(order.getPaymentStatus());
 
@@ -227,5 +256,11 @@ public class OrderService {
 
         orderDTO.setOrderDetails(detailDTOs);
         return orderDTO;
+    }
+    public List<OrderDTO> getAllOrders() {
+        List<Order> orders = orderRepository.findAll();
+        return orders.stream()
+                .map(order -> mapToOrderDTO(order, orderDetailRepository.findByOrder(order)))
+                .collect(Collectors.toList());
     }
 }
