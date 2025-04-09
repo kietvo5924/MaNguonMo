@@ -4,7 +4,6 @@ import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.backend.DTO.OrderDTO;
 import com.example.backend.DTO.OrderRequestDTO;
+import com.example.backend.DTO.PaymentRequestDTO;
 import com.example.backend.services.OrderService;
 
 @RestController
@@ -36,11 +36,26 @@ public class OrderController {
         return ResponseEntity.status(HttpStatus.CREATED).body(orderDTO);
     }
 
-    @PutMapping("/{orderId}")
-    public ResponseEntity<OrderDTO> updateOrder(@PathVariable Long orderId, @RequestBody OrderRequestDTO orderRequest) {
+    @PutMapping("/{orderId}/status")
+    public ResponseEntity<OrderDTO> updateOrderStatus(@PathVariable Long orderId, @RequestBody String newStatus) {
         try {
-            OrderDTO updatedOrder = orderService.updateOrder(orderId, orderRequest);
+            String status = newStatus.replace("\"", "");
+            OrderDTO updatedOrder = orderService.updateOrderStatus(orderId, status);
             return ResponseEntity.ok(updatedOrder);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
+    }
+
+    @PutMapping("/{orderId}/confirm")
+    public ResponseEntity<OrderDTO> confirmOrder(@PathVariable Long orderId) {
+        try {
+            OrderDTO order = orderService.getOrderById(orderId);
+            if (order.getStatus().equals("PENDING")) {
+                OrderDTO updatedOrder = orderService.updateOrderStatus(orderId, "SHIPPED");
+                return ResponseEntity.ok(updatedOrder);
+            }
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
@@ -58,10 +73,44 @@ public class OrderController {
 
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<OrderDTO>> getOrdersByUser(@PathVariable Long userId) {
-        List<OrderDTO> orders = orderService.getOrdersByUser(userId);
-        return ResponseEntity.ok(orders);
+        try {
+            List<OrderDTO> orders = orderService.getOrdersByUser(userId);
+            return ResponseEntity.ok(orders);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+    }
+
+    @GetMapping("/{orderId}")
+    public ResponseEntity<OrderDTO> getOrderById(@PathVariable Long orderId) {
+        try {
+            OrderDTO order = orderService.getOrderById(orderId);
+            if ("COD".equals(order.getPaymentMethod())) {
+                order.setPaymentMethod("Cash");
+            }
+            return ResponseEntity.ok(order);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+    }
+
+    @PostMapping("/{orderId}/pay")
+    public ResponseEntity<OrderDTO> payOrder(@PathVariable Long orderId, @RequestBody PaymentRequestDTO paymentRequest) {
+        try {
+            OrderDTO paidOrder = orderService.processPayment(orderId, paymentRequest);
+            return ResponseEntity.ok(paidOrder);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
+    }
+
+    @GetMapping
+    public ResponseEntity<List<OrderDTO>> getAllOrders() {
+        try {
+            List<OrderDTO> orders = orderService.getAllOrders();
+            return ResponseEntity.ok(orders);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
     }
 }
-
-
-
