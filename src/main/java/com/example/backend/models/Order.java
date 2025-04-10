@@ -49,7 +49,7 @@ public class Order {
 
     @Column(length = 50)
     @Size(max = 50, message = "Payment method must not exceed 50 characters")
-    private String paymentMethod; // Phương thức thanh toán: "CREDIT_CARD", "PAYPAL", "CASH_ON_DELIVERY"
+    private String paymentMethod; // Phương thức thanh toán: "CREDIT_CARD", "CASH_ON_DELIVERY"
 
     @Column
     private LocalDateTime paymentDate; // Thời điểm thanh toán (có thể null nếu chưa thanh toán)
