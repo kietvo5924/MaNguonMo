@@ -78,7 +78,7 @@ public class ProductService {
         product.setStockQuantity(productDTO.getStockQuantity());
         product.setImageUrl(productDTO.getImageUrl()); // ImageUrl được set từ DTO khi tạo mới
         product.setCategory(category);
-
+        product.setPopular(productDTO.isPopular());
         // Lưu product trước để có ID
         Product savedProduct = productRepository.save(product);
 
@@ -113,7 +113,7 @@ public class ProductService {
         existingProduct.setCategory(category);
         // Cập nhật imageUrl từ DTO (theo logic gốc bạn cung cấp)
         existingProduct.setImageUrl(productDTO.getImageUrl());
-
+        existingProduct.setPopular(productDTO.isPopular());
         // 5. Xóa versions và colors cũ (theo logic gốc: xóa hết tạo lại)
         deleteExistingVersionsAndColors(existingProduct);
 
@@ -300,6 +300,7 @@ public class ProductService {
         dto.setPrice(product.getPrice());
         dto.setStockQuantity(product.getStockQuantity());
         dto.setImageUrl(product.getImageUrl());
+        dto.setPopular(product.isPopular());
         // Kiểm tra null trước khi truy cập ID của category
         dto.setCategoryId(product.getCategory() != null ? product.getCategory().getId() : null);
 
