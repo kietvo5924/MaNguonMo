@@ -10,9 +10,7 @@ import com.example.backend.DTO.ProductDTO;
 import com.example.backend.DTO.ProductVersionDTO;
 import com.example.backend.services.ProductService;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.web.multipart.MultipartFile;
 import java.nio.file.Files;
@@ -25,10 +23,20 @@ import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
+// Import cần thiết cho ContentDisposition và Logger
+import org.springframework.http.ContentDisposition;
+import java.nio.charset.StandardCharsets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.nio.file.InvalidPathException;
+
+
 @RestController
 @RequestMapping("/admin/products")
 @CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
 public class ProductController {
+
+    private static final Logger logger = LoggerFactory.getLogger(ProductController.class);
 
     private final ProductService productService;
 
@@ -68,7 +76,7 @@ public class ProductController {
         ProductVersionDTO updatedVersion = productService.updateProductVersion(versionId, versionDTO);
         return ResponseEntity.ok(updatedVersion);
     }
-    
+
     @PutMapping("/colors/{colorId}")
     public ResponseEntity<ProductColorDTO> updateProductColor(@PathVariable Long colorId, @RequestBody ProductColorDTO colorDTO) {
         ProductColorDTO updatedColor = productService.updateProductColor(colorId, colorDTO);
@@ -94,7 +102,8 @@ public class ProductController {
                 Files.createDirectories(uploadPath);
             }
 
-            String fileName = System.currentTimeMillis() + "_" + file.getOriginalFilename();
+            String originalFilename = file.getOriginalFilename();
+            String fileName = System.currentTimeMillis() + "_" + (originalFilename != null ? originalFilename : "upload");
             Path filePath = uploadPath.resolve(fileName);
             Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
 
@@ -102,7 +111,11 @@ public class ProductController {
 
             return ResponseEntity.ok("Ảnh đã được tải lên: " + fileName);
         } catch (IOException e) {
+            logger.error("Error saving image for product ID {}: {}", productId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Lỗi khi lưu ảnh: " + e.getMessage());
+        } catch (Exception e) {
+             logger.error("Unexpected error during image upload for product ID {}: {}", productId, e.getMessage(), e);
+             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Lỗi server khi xử lý upload ảnh.");
         }
     }
 
@@ -113,14 +126,41 @@ public class ProductController {
             Resource resource = new UrlResource(filePath.toUri());
 
             if (resource.exists()) {
+                String originalFilename = resource.getFilename();
+                 if (originalFilename == null) {
+                     originalFilename = fileName;
+                 }
+
+                 // Logic để lấy tên file hiển thị (bỏ timestamp)
+                 String displayFilename = originalFilename;
+                 try {
+                     if (displayFilename.matches("^\\d{13}_.*")) {
+                         displayFilename = displayFilename.substring(displayFilename.indexOf('_') + 1);
+                     }
+                 } catch (Exception e) {
+                     logger.warn("Could not parse timestamp from filename: {}", originalFilename, e);
+                 }
+
+                // Sử dụng ContentDisposition.builder để mã hóa tên file đúng chuẩn
+                ContentDisposition contentDisposition = ContentDisposition.builder("inline")
+                    .filename(displayFilename, StandardCharsets.UTF_8) // Mã hóa tên file bằng UTF-8 theo RFC 5987
+                    .build();
+
                 return ResponseEntity.ok()
                         .contentType(MediaType.IMAGE_JPEG)
-                        .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                        .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition.toString()) // Set header đã tạo
                         .body(resource);
             } else {
                 return ResponseEntity.notFound().build();
             }
+        } catch (InvalidPathException e) {
+             logger.error("Invalid file path requested: {}", fileName, e);
+             return ResponseEntity.badRequest().build();
+        } catch (IOException e) {
+            logger.error("Error reading file {}: {}", fileName, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
         } catch (Exception e) {
+            logger.error("Unexpected error serving file {}: {}", fileName, e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }

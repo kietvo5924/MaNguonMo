@@ -11,7 +11,14 @@ public class ProductDTO {
 	    private String imageUrl;
 	    private Long categoryId; // Chỉ lưu ID của Category
 	    private Set<ProductVersionDTO> versions;
+	    private boolean popular;
 	    
+		public boolean isPopular() {
+			return popular;
+		}
+		public void setPopular(boolean popular) {
+			this.popular = popular;
+		}
 		public Long getId() {
 			return id;
 		}

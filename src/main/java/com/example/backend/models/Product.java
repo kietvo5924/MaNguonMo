@@ -44,7 +44,18 @@ public class Product {
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<ProductVersion> versions = new HashSet<>();
 
-    public Long getId() {
+    @Column(nullable = false) // Mặc định là false
+    private boolean popular = false;
+    
+    public boolean isPopular() {
+		return popular;
+	}
+
+	public void setPopular(boolean popular) {
+		this.popular = popular;
+	}
+
+	public Long getId() {
         return id;
     }
 
