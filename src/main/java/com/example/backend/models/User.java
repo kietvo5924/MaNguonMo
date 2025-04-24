@@ -37,8 +37,11 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(length = 10)
     private Gender gender;
-
-    @ManyToMany
+    
+    @Column(unique = true, nullable = true, length = 255) // Google ID là duy nhất, có thể null
+    private String googleUserId;
+	
+	@ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
         name = "user_roles",
         joinColumns = @JoinColumn(name = "user_id"),
@@ -72,4 +75,6 @@ public class User {
     public void setGender(Gender gender) { this.gender = gender; }
     public Set<Role> getRoles() { return roles; }
     public void setRoles(Set<Role> roles) { this.roles = roles; }
+    public String getGoogleUserId() { return googleUserId; }
+	public void setGoogleUserId(String googleUserId) { this.googleUserId = googleUserId; }
 }
