@@ -1,0 +1,8 @@
+# --- GOOGLE CLIENT ID ---
+google.client.id=920639027870-1ehgu8jd76bpg2sg6jedkbl1978qk55f.apps.googleusercontent.com
+
+# --- GOOGLE GEMINI API KEY ---
+google.gemini.api.key=AIzaSyBiVYHNQNqWQrQ38qYqCzu6fmoxO89JEbI 
+
+# Secret Stripe API Keys (Sử dụng biến môi trường trong môi trường production)
+stripe.secret.key=sk_test_51PlSdIRpdSTIEIHo2X73BUpF9eysIBC5IfEW35Rn7MbvWSw7lZEmmfjYFXGdkCwGzCakI5OOkttDGMO7hqGEC3Re00GBfwWn5d
