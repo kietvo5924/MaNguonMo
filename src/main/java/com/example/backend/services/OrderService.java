@@ -5,33 +5,27 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional; // Recommended
-
+import org.springframework.transaction.annotation.Transactional;
 import com.example.backend.DTO.OrderDTO;
 import com.example.backend.DTO.OrderDetailDTO;
 import com.example.backend.DTO.OrderRequestDTO;
 import com.example.backend.DTO.OrderItemDTO;
 import com.example.backend.DTO.PaymentRequestDTO;
-import com.example.backend.models.Order;
-import com.example.backend.models.OrderDetail;
-import com.example.backend.models.Product;
-import com.example.backend.models.ProductColor;
-import com.example.backend.models.ProductVersion;
-import com.example.backend.models.User;
-import com.example.backend.repositories.OrderDetailRepository;
-import com.example.backend.repositories.OrderRepository;
-import com.example.backend.repositories.ProductColorRepository;
-import com.example.backend.repositories.ProductRepository;
-import com.example.backend.repositories.ProductVersionRepository;
-import com.example.backend.repositories.UserRepository;
-
+import com.example.backend.models.*;
+import com.example.backend.repositories.*;
 import jakarta.persistence.EntityNotFoundException;
-import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
+import com.stripe.Stripe;
+import com.stripe.exception.StripeException;
+import com.stripe.model.PaymentIntent;
+import com.stripe.param.PaymentIntentCreateParams;
+import jakarta.annotation.PostConstruct;
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 public class OrderService {
@@ -45,7 +39,9 @@ public class OrderService {
     private final ProductVersionRepository productVersionRepository;
     private final ProductColorRepository productColorRepository;
 
-    // Constructor Injection
+    @Value("${stripe.secret.key}")
+    private String stripeSecretKey;
+
     @Autowired
     public OrderService(OrderRepository orderRepository, OrderDetailRepository orderDetailRepository,
                         UserRepository userRepository, ProductRepository productRepository,
@@ -58,8 +54,14 @@ public class OrderService {
         this.productColorRepository = productColorRepository;
     }
 
+    @PostConstruct
+    public void initStripe() {
+        Stripe.apiKey = stripeSecretKey;
+        log.info("Stripe API Key configured (simplified setup).");
+    }
+
     @Transactional
-    public OrderDTO createOrder(@Valid OrderRequestDTO orderRequest) {
+    public OrderDTO createOrder(OrderRequestDTO orderRequest) {
         log.info("Creating order for user ID: {}", orderRequest.getUserId());
         User user = userRepository.findById(orderRequest.getUserId())
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + orderRequest.getUserId()));
@@ -72,7 +74,6 @@ public class OrderService {
         order.setShippingAddress(orderRequest.getShippingAddress());
         order.setTotalPrice(0.0);
 
-        // Save order first to get ID for details
         Order savedOrderWithId = orderRepository.save(order);
 
         double totalOrderPrice = 0.0;
@@ -123,7 +124,6 @@ public class OrderService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
         List<Order> orders = orderRepository.findByUser(user);
-        // Eagerly fetch details to avoid lazy loading issues if mapping requires it
         return orders.stream()
                 .map(order -> mapToOrderDTO(order, orderDetailRepository.findByOrder(order)))
                 .collect(Collectors.toList());
@@ -137,74 +137,6 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderDTO updateOrder(Long orderId, @Valid OrderRequestDTO orderRequest) {
-         log.info("Updating order ID: {}", orderId);
-         Order order = orderRepository.findById(orderId)
-                 .orElseThrow(() -> new EntityNotFoundException("Order not found: " + orderId));
-
-         // Consider adding more checks here, e.g., only allow updates for PENDING orders
-         if (!"PENDING".equals(order.getStatus())) {
-             log.warn("Attempted to update order ID {} which is not in PENDING status ({})", orderId, order.getStatus());
-         }
-
-        // Delete old details first
-        orderDetailRepository.deleteByOrder(order);
-        order.getOrderDetails().clear();
-
-
-        order.setShippingAddress(orderRequest.getShippingAddress());
-        order.setTotalPrice(0.0); // Recalculate
-
-        List<OrderDetail> newOrderDetails = new ArrayList<>();
-        double totalOrderPrice = 0.0;
-
-         if (orderRequest.getItems() == null || orderRequest.getItems().isEmpty()) {
-             throw new IllegalArgumentException("Updated order must contain at least one item.");
-         }
-
-        for (OrderItemDTO item : orderRequest.getItems()) {
-            Product product = productRepository.findById(item.getProductId())
-                    .orElseThrow(() -> new EntityNotFoundException("Product not found: " + item.getProductId()));
-            ProductVersion productVersion = item.getProductVersionId() != null ?
-                    productVersionRepository.findById(item.getProductVersionId()).orElse(null) : null;
-            ProductColor productColor = item.getProductColorId() != null ?
-                    productColorRepository.findById(item.getProductColorId()).orElse(null) : null;
-
-            double price = product.getPrice();
-            if (productVersion != null && productVersion.getExtraPrice() != null) {
-                price += productVersion.getExtraPrice();
-            }
-             int quantity = item.getQuantity();
-              if (quantity <= 0) {
-                  throw new IllegalArgumentException("Item quantity must be positive for product: " + item.getProductId());
-              }
-            double totalAmount = price * quantity;
-            totalOrderPrice += totalAmount;
-
-            OrderDetail orderDetail = new OrderDetail();
-            orderDetail.setOrder(order); // Link to the existing order
-            orderDetail.setProduct(product);
-            orderDetail.setProductVersion(productVersion);
-            orderDetail.setProductColor(productColor);
-            orderDetail.setQuantity(quantity);
-            orderDetail.setPrice(price);
-            orderDetail.setTotalAmount(totalAmount);
-            newOrderDetails.add(orderDetail);
-        }
-
-        order.setTotalPrice(totalOrderPrice);
-        // Add new details before saving Order if Cascade includes PERSIST/MERGE
-        order.getOrderDetails().addAll(newOrderDetails);
-
-        Order savedOrder = orderRepository.save(order);
-
-        // Fetch the details again to be sure they are linked correctly for the DTO mapping
-        List<OrderDetail> finalDetails = orderDetailRepository.findByOrder(savedOrder);
-
-        return mapToOrderDTO(savedOrder, finalDetails);
-    }
-
-    @Transactional
     public OrderDTO updateOrderStatus(Long orderId, String newStatus) {
         log.info("Updating status for order {} to {}", orderId, newStatus);
         Order order = orderRepository.findById(orderId)
@@ -212,7 +144,6 @@ public class OrderService {
 
         order.setStatus(newStatus);
 
-        // Automatically mark COD as PAID upon successful delivery
         if ("DELIVERED".equalsIgnoreCase(newStatus)
                 && "COD".equals(order.getPaymentMethod())
                 && "UNPAID".equals(order.getPaymentStatus())) {
@@ -222,7 +153,6 @@ public class OrderService {
         }
 
         Order updatedOrder = orderRepository.save(order);
-        // Fetch details again for the DTO map
         List<OrderDetail> orderDetails = orderDetailRepository.findByOrder(updatedOrder);
         return mapToOrderDTO(updatedOrder, orderDetails);
     }
@@ -232,19 +162,18 @@ public class OrderService {
         log.info("Deleting order ID: {}", orderId);
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new EntityNotFoundException("Order not found: " + orderId));
-        orderRepository.delete(order); 
+        orderRepository.delete(order);
     }
 
     @Transactional
-    public OrderDTO processPayment(Long orderId, @Valid PaymentRequestDTO paymentRequest) {
-        log.info("Processing payment/confirmation for order ID: {}", orderId);
+    public OrderDTO processPayment(Long orderId, PaymentRequestDTO paymentRequest) {
+        log.info("Processing payment/confirmation for order ID: {} with method: {}", orderId, paymentRequest.getPaymentMethod());
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new EntityNotFoundException("Order not found: " + orderId));
 
-        // Prevent processing if already processed or not in PENDING state
         if (order.getPaymentMethod() != null || !"PENDING".equals(order.getStatus())) {
              log.warn("Skipping payment processing for order ID {}. PaymentMethod: {}, Status: {}",
-                      orderId, order.getPaymentMethod(), order.getStatus());
+                       orderId, order.getPaymentMethod(), order.getStatus());
              return mapToOrderDTO(order, orderDetailRepository.findByOrder(order));
          }
 
@@ -254,23 +183,70 @@ public class OrderService {
         if (backendPaymentMethod == null) {
              log.error("Invalid payment method '{}' for order ID {}", frontendMethod, orderId);
              throw new IllegalArgumentException("Invalid payment method: " + frontendMethod);
-        }
+         }
 
         order.setPaymentMethod(backendPaymentMethod);
 
         if ("COD".equals(backendPaymentMethod)) {
+            log.info("Processing COD for order ID {}.", orderId);
             order.setPaymentStatus("UNPAID");
             order.setPaymentDate(null);
             order.setStatus("PENDING");
+
         } else if ("CREDIT_CARD".equals(backendPaymentMethod)) {
-            if (paymentRequest.getAmount() == null || paymentRequest.getAmount() < order.getTotalPrice()) {
-                 log.error("Insufficient payment amount for order {}. Required: {}, Provided: {}", orderId, order.getTotalPrice(), paymentRequest.getAmount());
-                 throw new IllegalArgumentException("Payment amount insufficient. Required: " + order.getTotalPrice());
+            log.info("Processing Credit Card for order ID {} (Stripe Check).", orderId);
+            String stripePaymentMethodId = paymentRequest.getStripePaymentMethodId();
+
+            if (stripePaymentMethodId == null || stripePaymentMethodId.isBlank()) {
+                log.error("Stripe PaymentMethod ID is missing for order ID {}", orderId);
+                throw new IllegalArgumentException("Thông tin thanh toán thẻ bị thiếu.");
+            }
+
+            try {
+                 long amountInSmallestUnit;
+                 String currency = "vnd"; // *** THAY ĐỔI TIỀN TỆ CỦA BẠN Ở ĐÂY ***
+                 if ("vnd".equalsIgnoreCase(currency)) {
+                     amountInSmallestUnit = order.getTotalPrice().longValue();
+                 } else {
+                     amountInSmallestUnit = (long) (order.getTotalPrice() * 100);
+                 }
+
+                 Map<String, String> metadata = new HashMap<>();
+                 metadata.put("order_id", order.getId().toString());
+                 metadata.put("user_id", order.getUser() != null ? order.getUser().getId().toString() : "unknown");
+
+                log.debug("Attempting Stripe PaymentIntent creation (check) for order {}", orderId);
+                PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
+                    .setAmount(amountInSmallestUnit)
+                    .setCurrency(currency)
+                    .setPaymentMethod(stripePaymentMethodId)
+                    .setConfirmationMethod(PaymentIntentCreateParams.ConfirmationMethod.MANUAL)
+                    .setConfirm(true)
+                    .putAllMetadata(metadata)
+                    .setReturnUrl("http://localhost:3000/checkout/success?order_id=" + orderId)
+                    .build();
+
+                PaymentIntent paymentIntent = PaymentIntent.create(params);
+                log.info("Stripe check result for order {}: PI Status = {}", orderId, paymentIntent.getStatus());
+
+                if ("succeeded".equals(paymentIntent.getStatus())) {
+                    log.info("Stripe check SUCCEEDED for order {}. Applying original 'PAID' status.", orderId);
+                    order.setPaymentStatus("PAID");
+                    order.setPaymentDate(LocalDateTime.now());
+                    order.setStatus("PENDING");
+                } else {
+                    log.warn("Stripe check FAILED or requires action for order {}. PI Status: {}", orderId, paymentIntent.getStatus());
+                    throw new RuntimeException("Thanh toán thẻ không thành công hoặc cần xác thực thêm. Vui lòng thử lại hoặc dùng COD.");
+                }
+
+            } catch (StripeException e) {
+                log.error("Stripe API check error for order {}: {}", orderId, e.getMessage());
+                throw new RuntimeException("Lỗi xử lý thanh toán thẻ: " + e.getMessage());
+            } catch (Exception e) {
+                 log.error("Unexpected error during Stripe check for order {}: {}", orderId, e.getMessage(), e);
+                 throw new RuntimeException("Lỗi hệ thống khi kiểm tra thanh toán thẻ.");
              }
-            // Simulate successful online payment
-            order.setPaymentStatus("PAID");
-            order.setPaymentDate(LocalDateTime.now());
-            order.setStatus("PENDING"); // Status remains PENDING as per last request
+
         } else {
              log.warn("Unhandled payment method '{}'. Setting UNPAID/PENDING.", backendPaymentMethod);
              order.setPaymentStatus("UNPAID");
@@ -280,12 +256,12 @@ public class OrderService {
 
         try {
              Order processedOrder = orderRepository.save(order);
-             log.info("Order ID {} processed. Final Status: {}, PaymentStatus: {}",
+             log.info("Order ID {} state saved. Status: {}, PaymentStatus: {}",
                       processedOrder.getId(), processedOrder.getStatus(), processedOrder.getPaymentStatus());
              return mapToOrderDTO(processedOrder, orderDetailRepository.findByOrder(processedOrder));
         } catch (Exception e) {
              log.error("DB Error saving order ID {} after payment processing: {}", orderId, e.getMessage(), e);
-             throw new RuntimeException("Failed to save order after payment processing for order ID " + orderId, e);
+             throw new RuntimeException("Lỗi lưu đơn hàng sau khi xử lý thanh toán cho ID " + orderId, e);
         }
     }
 
@@ -306,7 +282,7 @@ public class OrderService {
 
         if (orderDetails != null) {
              List<OrderDetailDTO> detailDTOs = orderDetails.stream()
-                .filter(Objects::nonNull) // Filter out null details just in case
+                .filter(Objects::nonNull)
                 .map(detail -> {
                     OrderDetailDTO detailDTO = new OrderDetailDTO();
                     if (detail.getProduct() != null) {
@@ -339,19 +315,18 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
-    // Helper to map frontend payment method names to backend standard names
     private String mapFrontendPaymentMethodToBackend(String frontendMethod) {
         if (frontendMethod == null) return null;
         String upperCaseMethod = frontendMethod.trim().toUpperCase();
         switch (upperCaseMethod) {
             case "COD":
                 return "COD";
-            case "CREDITCARD": // Allow "CreditCard" from frontend
-            case "CREDIT_CARD": // Allow "CREDIT_CARD" from frontend
-                 return "CREDIT_CARD"; // Standardize to "CREDIT_CARD"
+            case "CREDITCARD":
+            case "CREDIT_CARD":
+                 return "CREDIT_CARD";
             default:
                 log.warn("Unrecognized payment method received: {}", frontendMethod);
-                return null; // Or throw exception if only specific methods are allowed
+                return null;
         }
     }
 }
